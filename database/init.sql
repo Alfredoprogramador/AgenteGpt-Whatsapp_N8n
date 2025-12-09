@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS conversations (
     content TEXT NOT NULL,
     tokens_used INTEGER DEFAULT 0,
     cost DECIMAL(10, 6) DEFAULT 0,
-    timestamp BIGINT,
+    timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     metadata JSONB DEFAULT '{}',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -255,9 +255,9 @@ COMMENT ON TABLE message_templates IS 'Templates de mensagens predefinidos';
 -- ====================================
 -- Finalização
 -- ====================================
--- Conceder permissões (ajuste conforme necessário)
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO n8n;
-GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO n8n;
+-- Conceder permissões específicas (princípio do menor privilégio)
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO n8n;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO n8n;
 
 -- Mensagem de conclusão
 DO $$

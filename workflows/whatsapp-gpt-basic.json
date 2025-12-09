@@ -17,7 +17,7 @@
     },
     {
       "parameters": {
-        "functionCode": "// Validar webhook verification do WhatsApp\nconst queryParams = $input.item.json.query;\n\n// Se for verificação do webhook\nif (queryParams && queryParams['hub.mode'] === 'subscribe') {\n  if (queryParams['hub.verify_token'] === '{{$env.WHATSAPP_VERIFY_TOKEN}}') {\n    return [{\n      json: {\n        challenge: queryParams['hub.challenge']\n      }\n    }];\n  } else {\n    throw new Error('Verify token inválido');\n  }\n}\n\n// Processar mensagem recebida\nconst body = $input.item.json.body;\n\nif (!body || !body.entry || !body.entry[0]) {\n  return [{ json: { skip: true } }];\n}\n\nconst entry = body.entry[0];\nconst changes = entry.changes[0];\nconst value = changes.value;\n\nif (!value.messages || !value.messages[0]) {\n  return [{ json: { skip: true } }];\n}\n\nconst message = value.messages[0];\nconst contact = value.contacts ? value.contacts[0] : {};\n\nreturn [{\n  json: {\n    from: message.from,\n    name: contact.profile?.name || 'Usuário',\n    messageId: message.id,\n    timestamp: message.timestamp,\n    text: message.text?.body || '',\n    type: message.type,\n    rawMessage: message\n  }\n}];"
+        "functionCode": "// Validar webhook verification do WhatsApp\nconst queryParams = $input.item.json.query;\n\n// Se for verificação do webhook\nif (queryParams && queryParams['hub.mode'] === 'subscribe') {\n  // Usar comparação segura de tokens (constant-time)\n  const crypto = require('crypto');\n  const expectedToken = process.env.WHATSAPP_VERIFY_TOKEN || '';\n  const providedToken = queryParams['hub.verify_token'] || '';\n  \n  // Constant-time comparison para prevenir timing attacks\n  const expectedBuffer = Buffer.from(expectedToken);\n  const providedBuffer = Buffer.from(providedToken);\n  \n  if (expectedBuffer.length === providedBuffer.length && \n      crypto.timingSafeEqual(expectedBuffer, providedBuffer)) {\n    return [{\n      json: {\n        challenge: queryParams['hub.challenge']\n      }\n    }];\n  } else {\n    throw new Error('Verify token inválido');\n  }\n}\n\n// Processar mensagem recebida\nconst body = $input.item.json.body;\n\nif (!body || !body.entry || !body.entry[0]) {\n  return [{ json: { skip: true } }];\n}\n\nconst entry = body.entry[0];\nconst changes = entry.changes[0];\nconst value = changes.value;\n\nif (!value.messages || !value.messages[0]) {\n  return [{ json: { skip: true } }];\n}\n\nconst message = value.messages[0];\nconst contact = value.contacts ? value.contacts[0] : {};\n\nreturn [{\n  json: {\n    from: message.from,\n    name: contact.profile?.name || 'Usuário',\n    messageId: message.id,\n    timestamp: message.timestamp,\n    text: message.text?.body || '',\n    type: message.type,\n    rawMessage: message\n  }\n}];"
       },
       "name": "Processar Webhook",
       "type": "n8n-nodes-base.code",
@@ -146,8 +146,11 @@
     },
     {
       "parameters": {
-        "operation": "executeQuery",
-        "query": "INSERT INTO conversations (phone_number, role, content, tokens_used, timestamp)\nVALUES \n('{{ $json.to }}', 'user', '{{ $json.userMessage }}', 0, {{ Date.now() }}),\n('{{ $json.to }}', 'assistant', '{{ $json.response }}', {{ $json.tokensUsed }}, {{ Date.now() }})",
+        "operation": "insert",
+        "table": "conversations",
+        "columns": "phone_number,role,content,tokens_used,timestamp",
+        "returnFields": "id",
+        "additionalFields": {},
         "options": {}
       },
       "name": "Salvar Conversa",
