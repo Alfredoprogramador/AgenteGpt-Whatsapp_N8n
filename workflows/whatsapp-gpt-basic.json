@@ -45,8 +45,16 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT * FROM conversations WHERE phone_number = '{{ $json.from }}' ORDER BY created_at DESC LIMIT 5",
-        "options": {}
+        "query": "SELECT * FROM conversations WHERE phone_number = $1 ORDER BY created_at DESC LIMIT 5",
+        "additionalFields": {
+          "queryParameters": {
+            "parameters": [
+              {
+                "parameter": "={{$json.from}}"
+              }
+            ]
+          }
+        }
       },
       "name": "Buscar Contexto",
       "type": "n8n-nodes-base.postgres",
@@ -95,7 +103,7 @@
     },
     {
       "parameters": {
-        "functionCode": "// Extrair resposta do GPT\nconst gptResponse = $input.first().json;\nconst assistantMessage = gptResponse.choices[0].message.content;\nconst tokensUsed = gptResponse.usage.total_tokens;\nconst userPhone = $input.first().json.userPhone;\nconst userName = $input.first().json.userName;\n\nreturn [{\n  json: {\n    to: userPhone,\n    response: assistantMessage,\n    tokensUsed: tokensUsed,\n    userName: userName\n  }\n}];"
+        "functionCode": "// Extrair resposta do GPT com validação\nconst gptResponse = $input.first().json;\n\n// Validar resposta do GPT\nif (!gptResponse || !gptResponse.choices || !Array.isArray(gptResponse.choices) || gptResponse.choices.length === 0) {\n  throw new Error('Resposta inválida do GPT');\n}\n\nif (!gptResponse.choices[0].message || !gptResponse.choices[0].message.content) {\n  throw new Error('Mensagem GPT vazia');\n}\n\nconst assistantMessage = gptResponse.choices[0].message.content;\nconst tokensUsed = gptResponse.usage?.total_tokens || 0;\nconst userPhone = $input.first().json.userPhone;\nconst userName = $input.first().json.userName;\nconst userMessage = $input.first().json.userMessage;\n\nreturn [{\n  json: {\n    to: userPhone,\n    response: assistantMessage,\n    tokensUsed: tokensUsed,\n    userName: userName,\n    userMessage: userMessage\n  }\n}];"
       },
       "name": "Processar Resposta",
       "type": "n8n-nodes-base.code",
@@ -106,30 +114,12 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{$env.WHATSAPP_API_URL}}/{{$env.WHATSAPP_PHONE_NUMBER_ID}}/messages",
+        "url": "={{$env.WHATSAPP_API_URL}}/={{$env.WHATSAPP_PHONE_NUMBER_ID}}/messages",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "whatsAppApi",
         "sendBody": true,
-        "bodyParameters": {
-          "parameters": [
-            {
-              "name": "messaging_product",
-              "value": "whatsapp"
-            },
-            {
-              "name": "to",
-              "value": "={{$json.to}}"
-            },
-            {
-              "name": "type",
-              "value": "text"
-            },
-            {
-              "name": "text",
-              "value": "={\"body\": \"{{$json.response}}\"}"
-            }
-          ]
-        },
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"messaging_product\": \"whatsapp\",\n  \"to\": \"{{$json.to}}\",\n  \"type\": \"text\",\n  \"text\": {\n    \"body\": \"{{$json.response}}\"\n  }\n}",
         "options": {}
       },
       "name": "Enviar WhatsApp",
@@ -146,12 +136,38 @@
     },
     {
       "parameters": {
-        "operation": "insert",
-        "table": "conversations",
-        "columns": "phone_number,role,content,tokens_used,timestamp",
-        "returnFields": "id",
-        "additionalFields": {},
-        "options": {}
+        "operation": "executeQuery",
+        "query": "INSERT INTO conversations (phone_number, role, content, tokens_used) VALUES ($1, $2, $3, $4), ($5, $6, $7, $8)",
+        "additionalFields": {
+          "queryParameters": {
+            "parameters": [
+              {
+                "parameter": "={{$json.to}}"
+              },
+              {
+                "parameter": "user"
+              },
+              {
+                "parameter": "={{$json.userMessage}}"
+              },
+              {
+                "parameter": "0"
+              },
+              {
+                "parameter": "={{$json.to}}"
+              },
+              {
+                "parameter": "assistant"
+              },
+              {
+                "parameter": "={{$json.response}}"
+              },
+              {
+                "parameter": "={{$json.tokensUsed}}"
+              }
+            ]
+          }
+        }
       },
       "name": "Salvar Conversa",
       "type": "n8n-nodes-base.postgres",
