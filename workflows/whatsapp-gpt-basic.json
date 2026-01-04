@@ -1,0 +1,325 @@
+{
+  "name": "WhatsApp GPT - Workflow Básico",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Webhook - WhatsApp",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookId": "whatsapp-webhook-receiver",
+      "id": "webhook-whatsapp-node"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Validar webhook verification do WhatsApp\nconst queryParams = $input.item.json.query;\n\n// Se for verificação do webhook\nif (queryParams && queryParams['hub.mode'] === 'subscribe') {\n  // Usar comparação segura de tokens (constant-time)\n  const crypto = require('crypto');\n  const expectedToken = process.env.WHATSAPP_VERIFY_TOKEN || '';\n  const providedToken = queryParams['hub.verify_token'] || '';\n  \n  // Constant-time comparison para prevenir timing attacks\n  const expectedBuffer = Buffer.from(expectedToken);\n  const providedBuffer = Buffer.from(providedToken);\n  \n  if (expectedBuffer.length === providedBuffer.length && \n      crypto.timingSafeEqual(expectedBuffer, providedBuffer)) {\n    return [{\n      json: {\n        challenge: queryParams['hub.challenge']\n      }\n    }];\n  } else {\n    throw new Error('Verify token inválido');\n  }\n}\n\n// Processar mensagem recebida\nconst body = $input.item.json.body;\n\nif (!body || !body.entry || !body.entry[0]) {\n  return [{ json: { skip: true } }];\n}\n\nconst entry = body.entry[0];\nconst changes = entry.changes[0];\nconst value = changes.value;\n\nif (!value.messages || !value.messages[0]) {\n  return [{ json: { skip: true } }];\n}\n\nconst message = value.messages[0];\nconst contact = value.contacts ? value.contacts[0] : {};\n\nreturn [{\n  json: {\n    from: message.from,\n    name: contact.profile?.name || 'Usuário',\n    messageId: message.id,\n    timestamp: message.timestamp,\n    text: message.text?.body || '',\n    type: message.type,\n    rawMessage: message\n  }\n}];"
+      },
+      "name": "Processar Webhook",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [450, 300],
+      "id": "process-webhook-node"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.skip}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "name": "Filtrar Mensagens",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [650, 300],
+      "id": "filter-messages-node"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM conversations WHERE phone_number = $1 ORDER BY created_at DESC LIMIT 5",
+        "additionalFields": {
+          "queryParameters": {
+            "parameters": [
+              {
+                "parameter": "={{$json.from}}"
+              }
+            ]
+          }
+        }
+      },
+      "name": "Buscar Contexto",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [850, 200],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-credential",
+          "name": "PostgreSQL"
+        }
+      },
+      "id": "get-context-node"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Construir prompt com contexto\nconst userMessage = $input.first().json.text;\nconst userName = $input.first().json.name;\nconst phoneNumber = $input.first().json.from;\nconst conversationHistory = $input.all()[0]?.json || [];\n\n// System prompt\nconst systemPrompt = `Você é um assistente virtual atencioso e prestativo.\n\nCONTEXTO:\n- Você atende clientes via WhatsApp\n- Seu objetivo é ajudar, esclarecer dúvidas e resolver problemas\n- Seja cordial, objetivo e use linguagem natural em Português BR\n\nDIRETRIZES:\n1. Sempre cumprimente o usuário\n2. Entenda a intenção da mensagem\n3. Forneça respostas claras e concisas\n4. Use emojis quando apropriado 😊\n5. Se não souber, seja honesto e ofereça alternativas`;\n\n// Construir array de mensagens\nlet messages = [\n  {\n    role: 'system',\n    content: systemPrompt\n  }\n];\n\n// Adicionar histórico (últimas 5 mensagens)\nif (Array.isArray(conversationHistory) && conversationHistory.length > 0) {\n  conversationHistory.reverse().forEach(msg => {\n    messages.push({\n      role: msg.role,\n      content: msg.content\n    });\n  });\n}\n\n// Adicionar mensagem atual\nmessages.push({\n  role: 'user',\n  content: userMessage\n});\n\nreturn [{\n  json: {\n    messages: messages,\n    userPhone: phoneNumber,\n    userName: userName,\n    userMessage: userMessage\n  }\n}];"
+      },
+      "name": "Construir Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [1050, 200],
+      "id": "build-prompt-node"
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "create",
+        "model": "gpt-3.5-turbo",
+        "messages": "={{$json.messages}}",
+        "options": {
+          "temperature": 0.7,
+          "maxTokens": 500
+        }
+      },
+      "name": "OpenAI GPT",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [1250, 200],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-credential",
+          "name": "OpenAI GPT"
+        }
+      },
+      "id": "openai-gpt-node"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Extrair resposta do GPT com validação\nconst gptResponse = $input.first().json;\n\n// Validar resposta do GPT\nif (!gptResponse || !gptResponse.choices || !Array.isArray(gptResponse.choices) || gptResponse.choices.length === 0) {\n  throw new Error('Resposta inválida do GPT');\n}\n\nif (!gptResponse.choices[0].message || !gptResponse.choices[0].message.content) {\n  throw new Error('Mensagem GPT vazia');\n}\n\nconst assistantMessage = gptResponse.choices[0].message.content;\nconst tokensUsed = gptResponse.usage?.total_tokens || 0;\nconst userPhone = $input.first().json.userPhone;\nconst userName = $input.first().json.userName;\nconst userMessage = $input.first().json.userMessage;\n\nreturn [{\n  json: {\n    to: userPhone,\n    response: assistantMessage,\n    tokensUsed: tokensUsed,\n    userName: userName,\n    userMessage: userMessage\n  }\n}];"
+      },
+      "name": "Processar Resposta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [1450, 200],
+      "id": "process-response-node"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.WHATSAPP_API_URL}}/={{$env.WHATSAPP_PHONE_NUMBER_ID}}/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "whatsAppApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"messaging_product\": \"whatsapp\",\n  \"to\": \"{{$json.to}}\",\n  \"type\": \"text\",\n  \"text\": {\n    \"body\": \"{{$json.response}}\"\n  }\n}",
+        "options": {}
+      },
+      "name": "Enviar WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1650, 200],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "whatsapp-credential",
+          "name": "WhatsApp Business API"
+        }
+      },
+      "id": "send-whatsapp-node"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO conversations (phone_number, role, content, tokens_used) VALUES ($1, $2, $3, $4), ($5, $6, $7, $8)",
+        "additionalFields": {
+          "queryParameters": {
+            "parameters": [
+              {
+                "parameter": "={{$json.to}}"
+              },
+              {
+                "parameter": "user"
+              },
+              {
+                "parameter": "={{$json.userMessage}}"
+              },
+              {
+                "parameter": "0"
+              },
+              {
+                "parameter": "={{$json.to}}"
+              },
+              {
+                "parameter": "assistant"
+              },
+              {
+                "parameter": "={{$json.response}}"
+              },
+              {
+                "parameter": "={{$json.tokensUsed}}"
+              }
+            ]
+          }
+        }
+      },
+      "name": "Salvar Conversa",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [1850, 200],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-credential",
+          "name": "PostgreSQL"
+        }
+      },
+      "id": "save-conversation-node"
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": {}
+      },
+      "name": "Responder Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2050, 200],
+      "id": "respond-webhook-node"
+    }
+  ],
+  "connections": {
+    "Webhook - WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Processar Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Processar Webhook": {
+      "main": [
+        [
+          {
+            "node": "Filtrar Mensagens",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filtrar Mensagens": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Buscar Contexto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Contexto": {
+      "main": [
+        [
+          {
+            "node": "Construir Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Construir Prompt": {
+      "main": [
+        [
+          {
+            "node": "OpenAI GPT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI GPT": {
+      "main": [
+        [
+          {
+            "node": "Processar Resposta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Processar Resposta": {
+      "main": [
+        [
+          {
+            "node": "Enviar WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Salvar Conversa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Salvar Conversa": {
+      "main": [
+        [
+          {
+            "node": "Responder Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {
+    "instanceId": "whatsapp-gpt-agent"
+  },
+  "tags": [
+    {
+      "name": "WhatsApp",
+      "createdAt": "2024-12-09T00:00:00.000Z",
+      "updatedAt": "2024-12-09T00:00:00.000Z",
+      "id": "1"
+    },
+    {
+      "name": "GPT",
+      "createdAt": "2024-12-09T00:00:00.000Z",
+      "updatedAt": "2024-12-09T00:00:00.000Z",
+      "id": "2"
+    },
+    {
+      "name": "AI",
+      "createdAt": "2024-12-09T00:00:00.000Z",
+      "updatedAt": "2024-12-09T00:00:00.000Z",
+      "id": "3"
+    }
+  ]
+}
