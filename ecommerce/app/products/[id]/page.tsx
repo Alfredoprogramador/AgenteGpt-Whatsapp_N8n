@@ -1,5 +1,6 @@
 'use client';
 
+import { use } from 'react';
 import { notFound } from 'next/navigation';
 import Image from 'next/image';
 import { ShoppingCart, Star, ArrowLeft, CheckCircle } from 'lucide-react';
@@ -8,8 +9,9 @@ import { mockProducts } from '@/lib/mockData';
 import { useCart } from '@/components/CartContext';
 import { useState } from 'react';
 
-export default function ProductDetailPage({ params }: { params: { id: string } }) {
-  const product = mockProducts.find((p) => p.id === params.id);
+export default function ProductDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
+  const product = mockProducts.find((p) => p.id === id);
   if (!product) return notFound();
 
   const { addItem } = useCart();
