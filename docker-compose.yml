@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  # ─────────────────────────────────────────────
+  # Next.js E-commerce Frontend
+  # ─────────────────────────────────────────────
+  ecommerce:
+    build:
+      context: ./ecommerce
+      dockerfile: Dockerfile
+    container_name: shopbot-ecommerce
+    restart: unless-stopped
+    ports:
+      - '3000:3000'
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
+      - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=${NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
+      - N8N_CHAT_WEBHOOK_URL=http://n8n:5678/webhook/chat
+      - NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+    depends_on:
+      - n8n
+    networks:
+      - shopbot-network
+
+  # ─────────────────────────────────────────────
+  # n8n Workflow Automation
+  # ─────────────────────────────────────────────
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: shopbot-n8n
+    restart: unless-stopped
+    ports:
+      - '5678:5678'
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER:-admin}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD:-changeme}
+      - N8N_HOST=0.0.0.0
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=${N8N_WEBHOOK_URL:-http://localhost:5678}
+      - GENERIC_TIMEZONE=America/Sao_Paulo
+      - APP_URL=${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      # n8n database (SQLite by default, use Postgres for production)
+      - DB_TYPE=sqlite
+      - DB_SQLITE_DATABASE=/home/node/.n8n/database.sqlite
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./n8n:/home/node/workflows:ro
+    networks:
+      - shopbot-network
+
+volumes:
+  n8n_data:
+    driver: local
+
+networks:
+  shopbot-network:
+    driver: bridge

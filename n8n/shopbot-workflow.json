@@ -1,0 +1,232 @@
+{
+  "name": "ShopBot – E-commerce Chatbot",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "chat",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook – Receber Mensagem",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "webhookId": "shopbot-chat"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract message and sessionId from the incoming request\nconst body = $input.first().json.body;\nconst message = body.message || '';\nconst sessionId = body.sessionId || 'default';\n\nreturn [{ json: { message, sessionId } }];"
+      },
+      "id": "parse-input",
+      "name": "Extrair Mensagem",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $json.sessionId }}",
+        "contextWindowLength": 10
+      },
+      "id": "memory",
+      "name": "Memória de Sessão",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1,
+      "position": [680, 460]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "options": {
+          "temperature": 0.7,
+          "maxTokens": 800
+        }
+      },
+      "id": "openai-model",
+      "name": "GPT-4o",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1,
+      "position": [680, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-credentials",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "name": "buscar_produtos",
+        "description": "Busca produtos no catálogo da loja por nome ou categoria. Use quando o usuário perguntar sobre produtos disponíveis, preços, estoque ou quiser encontrar algo específico.",
+        "workflowId": "",
+        "fields": {
+          "values": [
+            {
+              "name": "search",
+              "description": "Termo de busca – nome do produto ou categoria"
+            }
+          ]
+        }
+      },
+      "id": "tool-search-products",
+      "name": "Ferramenta: Buscar Produtos",
+      "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
+      "typeVersion": 1,
+      "position": [900, 460],
+      "parameters": {
+        "url": "={{ $env.APP_URL }}/api/products",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "search",
+              "value": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('search', 'Product search term', 'string') }}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.APP_URL }}/api/orders",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "email",
+              "value": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('email', 'Customer email address', 'string') }}"
+            }
+          ]
+        }
+      },
+      "id": "tool-check-order",
+      "name": "Ferramenta: Consultar Pedido",
+      "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
+      "typeVersion": 1,
+      "position": [1100, 460]
+    },
+    {
+      "parameters": {
+        "systemMessage": "Você é o assistente virtual da ShopBot, uma loja online de produtos esportivos e de estilo de vida. Seu nome é \"Bia\".\n\nSua personalidade:\n- Simpática, prestativa e objetiva\n- Usa emojis com moderação para tornar a conversa mais amigável\n- Responde sempre em português brasileiro\n- É especialista em produtos da loja\n\nVocê pode ajudar com:\n1. **Buscar produtos** – Use a ferramenta `buscar_produtos` para encontrar itens no catálogo\n2. **Consultar pedidos** – Use a ferramenta `consultar_pedido` com o e-mail do cliente\n3. **Informações gerais** – Responda sobre frete (grátis), pagamento (Stripe, cartão), política de trocas (30 dias)\n4. **Recomendações** – Sugira produtos com base nas necessidades do usuário\n\nRegras importantes:\n- NUNCA invente produtos ou preços que não estão no catálogo\n- Se não souber algo, diga isso honestamente e ofereça alternativas\n- Para consultar pedidos, sempre peça o e-mail do cliente primeiro\n- Quando sugerir um produto, inclua o preço e o link no formato: [Nome do Produto](/products/ID)\n- Seja conciso – respostas de até 3 parágrafos\n\nInformações da loja:\n- Frete: Grátis em todo o Brasil\n- Pagamento: Cartão de crédito/débito via Stripe\n- Troca/devolução: 30 dias após a compra\n- Atendimento: 24/7 via chat\n- Entrega: 5-10 dias úteis"
+      },
+      "id": "agent",
+      "name": "Agente IA – Bia",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ response: $json.output }) }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "respond",
+      "name": "Responder ao Frontend",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [900, 300]
+    }
+  ],
+  "connections": {
+    "Webhook – Receber Mensagem": {
+      "main": [
+        [
+          {
+            "node": "Extrair Mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrair Mensagem": {
+      "main": [
+        [
+          {
+            "node": "Agente IA – Bia",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agente IA – Bia": {
+      "main": [
+        [
+          {
+            "node": "Responder ao Frontend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GPT-4o": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Agente IA – Bia",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Memória de Sessão": {
+      "ai_memory": [
+        [
+          {
+            "node": "Agente IA – Bia",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ferramenta: Buscar Produtos": {
+      "ai_tool": [
+        [
+          {
+            "node": "Agente IA – Bia",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ferramenta: Consultar Pedido": {
+      "ai_tool": [
+        [
+          {
+            "node": "Agente IA – Bia",
+            "type": "ai_tool",
+            "index": 1
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "pinData": {},
+  "versionId": "1",
+  "tags": ["ecommerce", "chatbot", "shopbot"]
+}
