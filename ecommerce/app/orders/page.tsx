@@ -31,8 +31,9 @@ function OrdersContent() {
   const success = searchParams.get('success') === 'true';
 
   useEffect(() => {
-    if (searchParams.get('email')) fetchOrders(searchParams.get('email')!);
-  }, []);
+    const initialEmail = searchParams.get('email');
+    if (initialEmail) fetchOrders(initialEmail);
+  }, [searchParams]);
 
   async function fetchOrders(emailToSearch: string) {
     if (!emailToSearch) return;

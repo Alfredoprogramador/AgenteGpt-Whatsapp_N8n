@@ -24,7 +24,7 @@ export const mockProducts: Product[] = [
   {
     id: '3',
     name: 'Mochila Esportiva 30L',
-    description: 'Mochila resistente à água com compartimento para laptop e múltipsos bolsos organizadores.',
+    description: 'Mochila resistente à água com compartimento para laptop e múltiplos bolsos organizadores.',
     price: 199.99,
     stock: 20,
     image_url: 'https://images.unsplash.com/photo-1553062407-98eeb64c6a62?w=500',
